@@ -8,15 +8,13 @@
 #include "builtInCommands.h" //Includes functions for built in commands
 #define BUFLEN 1024
 #define wordArraySize 500 // We can make this bigger 
+int prevExitStatus = 0;  // Assume success (0) by default.
+
 
 
 /*
- * Updated command structure.
- * Instead of manually managing a char **args array,
  * we use an arraylist to store the command's arguments.
  */
-
-
 
 typedef struct command {
     char *program;          // Program name (executable)
@@ -117,9 +115,99 @@ void finalizeArgs(command_t *cmd) {
     }
 }
 
+
+// is_builtin_command: returns 1 if cmd is one of the built-in commands.
+int is_builtin_command(const char *cmd) {
+    return (strcmp(cmd, "cd") == 0 || strcmp(cmd, "pwd") == 0 ||
+            strcmp(cmd, "exit") == 0 || strcmp(cmd, "die") == 0 ||
+            strcmp(cmd, "which") == 0);
+}
+
+// handle_builtin_command: dispatches to the appropriate built-in handler.
+// It uses cmd->program if set; otherwise, it takes the first token in cmd->args->data.
+void handle_builtin_command(command_t *cmd) {
+    const char *cmdName = (cmd->program != NULL) ? cmd->program : cmd->args->data[0];
+
+    if (strcmp(cmdName, "cd") == 0) {
+        builtin_cd(cmd->args);
+    } else if (strcmp(cmdName, "pwd") == 0) {
+        builtin_pwd(cmd->args);
+    } else if (strcmp(cmdName, "exit") == 0) {
+        builtin_exit(cmd->args);
+    } else if (strcmp(cmdName, "die") == 0) {
+        builtin_die(cmd->args);
+    } else if (strcmp(cmdName, "which") == 0) {
+        builtin_which(cmd->args);
+    } else {
+        fprintf(stderr, "Unknown built-in command: %s\n", cmdName);
+    }
+}
+
+
+/*
+ * simulateExecuteCommand: Simulates executing a command (or chain of piped commands)
+ * with built-in handling of conditionals.
+ *
+ * If a command is conditional ("and"/"or"), then based on the previous exit status,
+ * the command (or entire pipeline) might be skipped.
+ */
+void simulateExecuteCommand(command_t *cmd) {
+    // Check conditionals in the current command:
+    if (cmd->condition != NONE) {
+        if (cmd->condition == AND && prevExitStatus != 0) {
+            // 'and' condition not met (previous command failed)
+            printf("Skipping command due to 'and' condition (prevExitStatus = %d).\n", prevExitStatus);
+            return;
+        }
+        if (cmd->condition == OR && prevExitStatus == 0) {
+            // 'or' condition not met (previous command succeeded)
+            printf("Skipping command due to 'or' condition (prevExitStatus = %d).\n", prevExitStatus);
+            return;
+        }
+    }
+
+    // If the command is part of a pipeline, simulate the entire pipeline:
+    if (cmd->pipePresent) {
+        printf("Simulating execution of pipeline: ");
+        command_t *cur = cmd;
+        while (cur != NULL) {
+            const char *cmdName = cur->program ? cur->program : cur->args->data[0];
+            printf("'%s' ", cmdName);
+            cur = cur->next;
+        }
+        printf("\n");
+        // For simulation purposes, assume the entire pipeline succeeds.
+        prevExitStatus = 0;
+    } else {
+        // Single command simulation:
+        const char *cmdName = cmd->program ? cmd->program : cmd->args->data[0];
+        printf("Simulating execution of command: %s\n", cmdName);
+
+        // Check if it's a built-in command.
+        if (is_builtin_command(cmd->program ? cmd->program : cmd->args->data[0])) {
+            printf("Executing built-in command '%s'.\n", cmdName);
+            // Here, you can call your built-in handler (or simulate its behavior).
+            // For example:
+            handle_builtin_command(cmd);
+        } else {
+            printf("Would execute external command '%s'.\n", cmdName);
+        }
+        // For simulation purposes, assume the command succeeds.
+        prevExitStatus = 0;
+    }
+}
+
+
+
+
 /*
  * Process the tokens in the provided arraylist 'list' (each token is a null-terminated string)
  * and build a command structure using the arraylist for the arguments.
+ */
+/*
+ * Process the tokens in the provided arraylist 'list'
+ * and build a command structure using the arraylist for the arguments.
+ * Then, simulate executing the command.
  */
 void processCommand(arraylist_t *list) {
     if (list->length == 0) {
@@ -184,11 +272,8 @@ void processCommand(arraylist_t *list) {
         }
         // Check for conditional tokens "and" / "or".
         else if (strcmp(token, "and") == 0 || strcmp(token, "or") == 0) {
-            if (strcmp(token, "and") == 0) {
-                cmd->condition = AND;
-            } else {
-                cmd->condition = OR;
-            }         
+            cmd->condition = (strcmp(token, "and") == 0) ? AND : OR;
+            // Do not add conditional tokens to the arguments list.
         }
         // Otherwise, treat token as a normal argument.
         else {
@@ -199,22 +284,12 @@ void processCommand(arraylist_t *list) {
     // Finalize the args arraylist to ensure NULL termination.
     finalizeArgs(commandHead);
 
-    // At this point, the command structure is ready for execution.
-    // For demonstration purposes, we print out the arguments:
-    if (commandHead->args && commandHead->args->data) {
-        printf("Command arguments:\n");
-        for (int i = 0; commandHead->args->data[i] != NULL; i++) {
-            printf("  %s\n", commandHead->args->data[i]);
-        }
-    }
-    
-    // Now here we want to execute the command
-    // executeCommand(commandHead);
-    
-    // Finally, free the command structure (including any piped commands) after execution.
+    // --- Instead of executing, simulate the execution of the command ---
+    simulateExecuteCommand(commandHead);
+
+    // Finally, free the command structure (including any piped commands).
     freeCommandStruct(commandHead);
 }
-
 
 /*
 it splits the given command into tokens using whitespace as the delimiter.
@@ -361,6 +436,8 @@ void process_lines(int fd, arraylist_t *list, int interactive) {
         free(line);
     }
 }
+
+
 
 // Main--> we set up input, determine interactive mode, and process commands.
 int main(int argc, char *argv[]) {

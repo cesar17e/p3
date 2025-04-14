@@ -4,9 +4,14 @@
 #include <string.h>
 #include "builtInCommands.h"
 
+/*
+ * builtin_cd:
+ * Expects an argument list where list->data[0] is "cd" and list->data[1] is the directory.
+ * Since finalizeArgs appends a NULL, the actual number of tokens is (list->length - 1).
+ */
 void builtin_cd(arraylist_t *list) {
-    // Expect list->data[0] to be "cd" and list->data[1] the directory.
-    if (list->length != 2) {
+    int argCount = list->length - 1;  // Exclude the NULL element
+    if (argCount != 2) {  // We expect "cd" and one argument
         fprintf(stderr, "cd: expected one argument\n");
         return;
     }
@@ -15,32 +20,60 @@ void builtin_cd(arraylist_t *list) {
     }
 }
 
+/*
+ * builtin_pwd:
+ * Expects only the command "pwd" (no extra arguments).
+ */
 void builtin_pwd(arraylist_t *list) {
+    (void)list;  // pwd doesn't need extra arguments.
     char cwd[4096];
     if (getcwd(cwd, sizeof(cwd)) == NULL) {
         perror("pwd");
         return;
     }
     printf("%s\n", cwd);
+    fflush(stdout);  // Ensure output is flushed immediately.
 }
 
+/*
+ * builtin_exit:
+ * Expects only the command "exit" (no extra arguments).
+ */
 void builtin_exit(arraylist_t *list) {
-    // You could optionally ignore extra arguments.
+    int argCount = list->length - 1;
+    if (argCount != 1) {
+        fprintf(stderr, "exit: expected no arguments\n");
+        return;
+    }
     exit(EXIT_SUCCESS);
 }
 
+/*
+ * builtin_die:
+ * Prints error messages (if any) following the "die" command, then exits with failure.
+ * Expects at least "die" in the list.
+ */
 void builtin_die(arraylist_t *list) {
-    // Print any error messages following "die" and exit with failure.
-    for (int i = 1; i < list->length; i++) {
+    int argCount = list->length - 1;
+    if (argCount < 1) {  // Should at least have "die"
+        fprintf(stderr, "die: missing message\n");
+        exit(EXIT_FAILURE);
+    }
+    // Print additional arguments (if any) as the error message.
+    for (int i = 1; i < list->length - 1; i++) {
         fprintf(stderr, "%s ", list->data[i]);
     }
     fprintf(stderr, "\n");
     exit(EXIT_FAILURE);
 }
 
+/*
+ * builtin_which:
+ * Expects an argument list where list->data[0] is "which" and list->data[1] is the command name.
+ */
 void builtin_which(arraylist_t *list) {
-    // For simplicity, assume exactly one argument: the command name.
-    if (list->length != 2) {
+    int argCount = list->length - 1;
+    if (argCount != 2) {  // "which" plus one argument
         fprintf(stderr, "which: expected one argument\n");
         return;
     }
@@ -59,33 +92,3 @@ void builtin_which(arraylist_t *list) {
     if (!found)
         fprintf(stderr, "which: %s not found\n", cmd);
 }
-
-
-// int is_builtin(const char *cmd) {
-//     if (strcmp(cmd, "cd") == 0 || strcmp(cmd, "pwd") == 0 || strcmp(cmd, "exit") == 0 || strcmp(cmd, "die") == 0 || strcmp(cmd, "which") == 0){
-//         return 1;
-//     }
-// }
-
-// int handle_builtin(arraylist_t *list) {
-//     if (list->length == 0)
-//         return 0;  // No command to process, its empty for some reason maybe we need to find out why later
-        
-//     if (!is_builtin(list->data[0]))
-//         return 0;  // Not a builtIn so the caller caller will need to use external stuff
-    
-//     // Compare and call the corresponding function
-//     if (strcmp(list->data[0], "cd") == 0) {
-//         builtin_cd(list);
-//     } else if (strcmp(list->data[0], "pwd") == 0) {
-//         builtin_pwd(list);
-//     } else if (strcmp(list->data[0], "exit") == 0) {
-//         builtin_exit(list);
-//     } else if (strcmp(list->data[0], "die") == 0) {
-//         builtin_die(list);
-//     } else if (strcmp(list->data[0], "which") == 0) {
-//         builtin_which(list);
-//     }
-    
-//     return 1;  // Built-in was handled.
-// }
