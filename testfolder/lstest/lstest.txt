@@ -1,0 +1,4 @@
+echo Printing all txt files
+ls *.txt
+cd ..
+pwd

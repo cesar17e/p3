@@ -1,13 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>  // For chdir(), getcwd(), access()
+#include <unistd.h>  
 #include <string.h> 
 #include "builtInCommands.h"
 
-/*
- * The cd function, we used chdir to go into the directory
- * Notes: Since finalizeArgs appends the NULL, the actual number of tokens is (list->length - 1).
- */
+// The cd function, we used chdir to go into the directory 
 void builtin_cd(arraylist_t *list) {
     int argCount = list->length - 1; //Not including the null char
     if (argCount != 2) { //Cd must expect one arg
@@ -19,9 +16,7 @@ void builtin_cd(arraylist_t *list) {
     }
 }
 
-/*
- * pwd - it expects only the command "pwd" (no extra arguments).
- */
+// pwd prints the path of where are we are heading to
 void builtin_pwd(arraylist_t *list) {
     (void)list;  // Original code used list, but later on we realized we didnt need it, alot of our code uses it this way but its too much work to change it, just use (void)list it tells the compiler that were not using it on purpose
     char path[4096]; //The array for the path we wil get
@@ -48,8 +43,7 @@ void builtin_exit(arraylist_t *list) {
 }
 
 /*
- * builtin_die:
- * Prints error messages following the die command, then exits with failure.
+ * die, Prints error messages following the die command, then exits with failure.
  */
 void builtin_die(arraylist_t *list) {
     int argCount = list->length - 1;
@@ -66,7 +60,7 @@ void builtin_die(arraylist_t *list) {
 }
 
 /*
- * builtin_which, for executables only
+ * which, for executables only
  */
 void builtin_which(arraylist_t *list) {
     int argCount = list->length - 1;
@@ -91,7 +85,7 @@ void builtin_which(arraylist_t *list) {
             break;
         }
     }
-
+    
     if (!found){ //If we didnt find it print something out
         fprintf(stderr, "which: %s not found\n", cmd);
     }

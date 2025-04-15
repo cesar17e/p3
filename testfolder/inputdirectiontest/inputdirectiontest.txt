@@ -1,0 +1,8 @@
+echo Testing input direction! Changing directories...
+cd ./testfolder/inputdirectiontest
+echo In test folder! Opening inputdummy.txt... syntax: cat<inputdummy.txt
+cat < inputdummy.txt 
+echo file inputdummy.txt read. 
+
+
+

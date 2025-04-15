@@ -1,2 +1,0 @@
-cd testfolder/wildcardtestcase
-ls a*a

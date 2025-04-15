@@ -1,0 +1,3 @@
+this is text inside a file
+and it should all be printed
+by the test case. this is expected behavior.
