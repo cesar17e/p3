@@ -18,7 +18,7 @@ int firstTimeRunning = 0;
  * The struct command where it will hold all the needed data when we process this within the function processCommand
  */
  
-
+ 
 typedef struct command {
     char *program;          // Program name, which is the executable
     arraylist_t *args;      // Arraylist of argument strings, for execv, use args->data
@@ -184,7 +184,7 @@ void executeCommand(command_t *cmd) {
         //!This is the case where it is the very command
         if(firstTimeRunning == 0){
             fprintf(stdout, "Error: 'and' or 'or' command provided when this is the first command run. \n");
-            firstTimeRunning = 1;
+
             return;
         }
         if (cmd->condition == AND && prevExitStatus != 0) {
@@ -569,7 +569,6 @@ void expandWildcard(command_t *cmd, const char *token) {
     }
 
     closedir(dir);
-
     // If no entries matched, add the original token.
     if (matches == 0){
         addTokenToArgs(cmd, token);
@@ -582,13 +581,65 @@ void expandWildcard(command_t *cmd, const char *token) {
  * Process the tokens in the provided arraylist 'list'
  * and build a command structure using the arraylist for the arguments.
  * Then, simulate executing the command.
- */
-void processCommand(arraylist_t *list) {
+ */void processCommand(arraylist_t *list) {
     if (list->length == 0) {
         return; // Nothing to process.
     }
     
-    // Create the head of the command chain.
+    /* SPECIAL SYNTAX HANDLING:
+       If the command line is of the form:  pattern < command [args ...]
+       where the first token contains an '*' then instead of treating the
+       "<" as input redirection we expand the pattern and use its expanded 
+       tokens as the arguments for the given command.
+    */
+   if (list->length >= 3 && strchr(list->data[0], '*') != NULL && strcmp(list->data[1], "<") == 0) {
+    // Create a temporary command node to hold the wildcard expansion.
+    command_t *temp = createCommandStruct();
+    if (!temp) {
+        fprintf(stderr, "Failed to create temporary command node\n");
+        return;
+    }
+    // Expand the wildcard pattern from the first token.
+    expandWildcard(temp, list->data[0]);
+    finalizeArgs(temp);
+    
+    // Create the command node for the actual command.
+    command_t *commandHead = createCommandStruct();
+    if (!commandHead) {
+        fprintf(stderr, "Failed to create command structure\n");
+        freeCommandStruct(temp);
+        return;
+    }
+    // Set the program to run (taken from token 2)
+    commandHead->program = strdup(list->data[2]);
+    if (!commandHead->program) {
+        perror("strdup failed for program");
+        freeCommandStruct(temp);
+        freeCommandStruct(commandHead);
+        return;
+    }
+    // Prepend the expanded wildcard filenames as arguments using a NULL-terminated loop.
+    for (int j = 0; j < temp->args->length; j++) {
+        if (temp->args->data[j] != NULL) {
+            addTokenToArgs(commandHead, temp->args->data[j]);
+        }
+    }
+    
+    // Add any extra tokens (if provided) after token 2 as additional arguments.
+    for (int i = 3; i < list->length; i++) {
+        addTokenToArgs(commandHead, list->data[i]);
+    }
+    finalizeArgs(commandHead);
+    freeCommandStruct(temp);
+    
+    // Execute the command that uses the expanded wildcard filenames.
+    executeCommand(commandHead);
+    freeCommandStruct(commandHead);
+    return;
+}
+
+    
+    // Otherwise, process the tokens in the usual way:
     command_t *commandHead = createCommandStruct();
     if (!commandHead) {
         fprintf(stderr, "Failed to create command structure\n");
@@ -596,14 +647,11 @@ void processCommand(arraylist_t *list) {
     }
     
     command_t *cmd = commandHead;  // Pointer to current command.
-
-    // Iterate through tokens from the token list.
     for (int i = 0; i < list->length; i++) {
         char *token = list->data[i];
         
-        // Check for input redirection token "<".
         if (strcmp(token, "<") == 0) {
-            i++;  // Next token should be the input file name.
+            i++;  // Next token is the input file name.
             if (i < list->length) {
                 cmd->inputFile = strdup(list->data[i]);
                 if (!cmd->inputFile) {
@@ -616,10 +664,8 @@ void processCommand(arraylist_t *list) {
                 freeCommandStruct(commandHead);
                 return;
             }
-        }
-        // Check for output redirection token ">".
-        else if (strcmp(token, ">") == 0) {
-            i++;  // Next token should be the output file name.
+        } else if (strcmp(token, ">") == 0) {
+            i++;  // Next token is the output file name.
             if (i < list->length) {
                 cmd->outputFile = strdup(list->data[i]);
                 if (!cmd->outputFile) {
@@ -632,9 +678,7 @@ void processCommand(arraylist_t *list) {
                 freeCommandStruct(commandHead);
                 return;
             }
-        }
-        // Check for pipeline operator "|".
-        else if (strcmp(token, "|") == 0) {
+        } else if (strcmp(token, "|") == 0) {
             cmd->pipePresent = 1;
             cmd->next = createCommandStruct();
             if (!cmd->next) {
@@ -642,15 +686,11 @@ void processCommand(arraylist_t *list) {
                 freeCommandStruct(commandHead);
                 return;
             }
-            cmd = cmd->next;  // Switch to the next command structure.
-        }
-        // Check for conditional tokens "and" / "or".
-        else if (strcmp(token, "and") == 0 || strcmp(token, "or") == 0) {
-            // According to the specification, conditionals must occur
-            // as the first token of the entire command (i.e. in commandHead).
-            // If we're not in the head (i.e. cmd != commandHead), it's an error.
+            cmd = cmd->next;
+        } else if (strcmp(token, "and") == 0 || strcmp(token, "or") == 0) {
+            // As per your specification, conditionals may only appear in the very first command.
             if (cmd != commandHead) {
-                fprintf(stderr, "Syntax error: conditional operator after a pipe is invalid.\n");
+                fprintf(stderr, "Syntax error: conditional operator cannot appear after a pipe.\n");
                 freeCommandStruct(commandHead);
                 return;
             }
@@ -659,10 +699,9 @@ void processCommand(arraylist_t *list) {
             } else {
                 cmd->condition = OR;
             }
-            // Do not add the conditional token to the arguments list.
-        }
-        // Otherwise, treat the token as a normal argument.
-        else {
+            // Do not add the conditional token to the argument list.
+        } else {
+            // Check for wildcards.
             if (strchr(token, '*') != NULL) {
                 expandWildcard(cmd, token);
             } else {
@@ -671,11 +710,9 @@ void processCommand(arraylist_t *list) {
         }
     }
     
-    // Finalize the args arraylist to ensure NULL termination.
     finalizeArgs(commandHead);
-
-    // For simulation purposes, if the program name has not been explicitly set,
-    // assume it's the first token in the arguments.
+    
+    // If the program name is not set, assume it is the first token.
     if (commandHead->program == NULL && commandHead->args->data[0] != NULL) {
         commandHead->program = strdup(commandHead->args->data[0]);
         if (!commandHead->program) {
@@ -684,26 +721,23 @@ void processCommand(arraylist_t *list) {
             return;
         }
     }
-
-
-{
-    command_t *temp = commandHead->next;
-    while (temp != NULL) {
-        if (temp->condition != NONE) {
-            fprintf(stderr, "Syntax error: conditional operator cannot appear after a pipe.\n");
-            freeCommandStruct(commandHead);
-            return;
-        }
-        temp = temp->next;
-    }
-}
     
-    // Execute or simulate executing the command structure.
+    {
+        command_t *temp = commandHead->next;
+        while (temp != NULL) {
+            if (temp->condition != NONE) {
+                fprintf(stderr, "Syntax error: conditional operator cannot appear after a pipe.\n");
+                freeCommandStruct(commandHead);
+                return;
+            }
+            temp = temp->next;
+        }
+    }
+    
     executeCommand(commandHead);
-
-    // Finally, free the command structure (including any piped commands).
     freeCommandStruct(commandHead);
 }
+
 
 
 /*

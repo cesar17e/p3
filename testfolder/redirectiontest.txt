@@ -1,0 +1,7 @@
+false
+or echo Printing current directory in file cat.txt if this statement works!
+true
+pwd > meow.txt
+and echo "meow.txt reads..."
+cat meow.txt
+and echo test complete!
