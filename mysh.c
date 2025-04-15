@@ -4,13 +4,12 @@
 #include <fcntl.h>     // For open()
 #include <string.h>
 #include <ctype.h>
+#include <sys/wait.h>
 #include "arraylist.h"
 #include "builtInCommands.h" //Includes functions for built in commands
 #define BUFLEN 1024
 #define wordArraySize 500 // We can make this bigger 
-int prevExitStatus = 0;  // Assume success (0) by default.
-
-
+int prevExitStatus = 0;  // Assume success (0) by default
 
 /*
  * we use an arraylist to store the command's arguments.
@@ -151,53 +150,353 @@ void handle_builtin_command(command_t *cmd) {
  * If a command is conditional ("and"/"or"), then based on the previous exit status,
  * the command (or entire pipeline) might be skipped.
  */
-void simulateExecuteCommand(command_t *cmd) {
-    // Check conditionals in the current command:
+// void simulateExecuteCommand(command_t *cmd) {
+//     // Check conditionals in the current command:
+//     if (cmd->condition != NONE) {
+//         if (cmd->condition == AND && prevExitStatus != 0) {
+//             // 'and' condition not met (previous command failed)
+//             printf("Skipping command due to 'and' condition (prevExitStatus = %d).\n", prevExitStatus);
+//             return;
+//         }
+//         if (cmd->condition == OR && prevExitStatus == 0) {
+//             // 'or' condition not met (previous command succeeded)
+//             printf("Skipping command due to 'or' condition (prevExitStatus = %d).\n", prevExitStatus);
+//             return;
+//         }
+//     }
+
+//     // If the command is part of a pipeline, simulate the entire pipeline:
+//     if (cmd->pipePresent) {
+//         printf("Simulating execution of pipeline: ");
+//         command_t *cur = cmd;
+//         while (cur != NULL) {
+//             const char *cmdName = cur->program ? cur->program : cur->args->data[0];
+//             printf("'%s' ", cmdName);
+//             cur = cur->next;
+//         }
+//         printf("\n");
+//         // For simulation purposes, assume the entire pipeline succeeds.
+//         prevExitStatus = 0;
+//     } else {
+//         // Single command simulation:
+//         const char *cmdName = cmd->program ? cmd->program : cmd->args->data[0];
+//         printf("Simulating execution of command: %s\n", cmdName);
+
+//         // Check if it's a built-in command.
+//         if (is_builtin_command(cmd->program ? cmd->program : cmd->args->data[0])) {
+//             printf("Executing built-in command '%s'.\n", cmdName);
+//             // Here, you can call your built-in handler (or simulate its behavior).
+//             // For example:
+//             handle_builtin_command(cmd);
+//         } else {
+//             printf("Would execute external command '%s'.\n", cmdName);
+//         }
+//         // For simulation purposes, assume the command succeeds.
+//         prevExitStatus = 0;
+//     }
+// }
+
+/*
+ * executeCommand:
+ * Executes a single command, or a simple pipeline of two commands, according to:
+ * - Conditional operators: if the command starts with "and" or "or", we decide whether to
+ *   execute it based on prevExitStatus.
+ * - Pipelines: if cmd->pipePresent is set, we assume a two-command pipeline.
+ * - Redirection: input (<) and output (>) redirection are performed in the appropriate child
+ *   processes (or, for built-in commands that modify shell state, in the parent after temporarily
+ *   modifying the file descriptors).
+ *
+ * For built-in commands (cd, pwd, exit, die, which) that run in the main shell process,
+ * we handle them directly when no pipeline is involved. However, if they appear in a pipeline,
+ * they must be forked (and their effect on the shell process will not persist).
+ */
+void executeCommand(command_t *cmd) {
+    // ======================================================
+    // 1. Handle Conditional Execution:
+    // ======================================================
     if (cmd->condition != NONE) {
         if (cmd->condition == AND && prevExitStatus != 0) {
-            // 'and' condition not met (previous command failed)
-            printf("Skipping command due to 'and' condition (prevExitStatus = %d).\n", prevExitStatus);
+            // Skip execution if previous command failed.
+            fprintf(stdout, "Skipping command due to 'and' condition (prevExitStatus = %d).\n", prevExitStatus);
             return;
         }
         if (cmd->condition == OR && prevExitStatus == 0) {
-            // 'or' condition not met (previous command succeeded)
-            printf("Skipping command due to 'or' condition (prevExitStatus = %d).\n", prevExitStatus);
+            // Skip execution if previous command succeeded.
+            fprintf(stdout, "Skipping command due to 'or' condition (prevExitStatus = %d).\n", prevExitStatus);
             return;
         }
     }
 
-    // If the command is part of a pipeline, simulate the entire pipeline:
-    if (cmd->pipePresent) {
-        printf("Simulating execution of pipeline: ");
-        command_t *cur = cmd;
-        while (cur != NULL) {
-            const char *cmdName = cur->program ? cur->program : cur->args->data[0];
-            printf("'%s' ", cmdName);
-            cur = cur->next;
+    // ======================================================
+    // 2. Pipeline Execution (assumed to be two commands)
+    // ======================================================
+    if (cmd->pipePresent && cmd->next) {
+        int pipefd[2];
+        if (pipe(pipefd) < 0) {
+            perror("pipe");
+            prevExitStatus = 1;
+            return;
         }
-        printf("\n");
-        // For simulation purposes, assume the entire pipeline succeeds.
-        prevExitStatus = 0;
-    } else {
-        // Single command simulation:
-        const char *cmdName = cmd->program ? cmd->program : cmd->args->data[0];
-        printf("Simulating execution of command: %s\n", cmdName);
+        
+        // Fork first child for the left command.
+        pid_t pid1 = fork();
+        if (pid1 < 0) {
+            perror("fork");
+            prevExitStatus = 1;
+            return;
+        }
+        if (pid1 == 0) {
+            // Child 1: Execute left-side command.
+            // Close unused read end.
+            close(pipefd[0]);
+            // Redirect standard output to pipe's write end.
+            if (dup2(pipefd[1], STDOUT_FILENO) < 0) {
+                perror("dup2 (child1)");
+                exit(1);
+            }
+            close(pipefd[1]);
+            
+            // For simplicity, we assume pipeline subcommands have no redirection.
+            const char *cmdName = (cmd->program != NULL) ? cmd->program : cmd->args->data[0];
+            if (is_builtin_command(cmdName)) {
+                // In a pipeline, run built-in in the child.
+                handle_builtin_command(cmd);
+                exit(0);
+            } else {
+                // If cmdName is a bare name (no '/') search in the prescribed directories.
+                char executablePath[4096];
+                if (strchr(cmdName, '/')) {
+                    strncpy(executablePath, cmdName, sizeof(executablePath));
+                    executablePath[sizeof(executablePath)-1] = '\0';
+                } else {
+                    const char *dirs[] = {"/usr/local/bin", "/usr/bin", "/bin"};
+                    int found = 0;
+                    for (int i = 0; i < 3; i++) {
+                        snprintf(executablePath, sizeof(executablePath), "%s/%s", dirs[i], cmdName);
+                        if (access(executablePath, X_OK) == 0) {
+                            found = 1;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        fprintf(stderr, "%s: command not found\n", cmdName);
+                        exit(1);
+                    }
+                }
+                execv(executablePath, cmd->args->data);
+                perror("execv");
+                exit(1);
+            }
+        }
 
-        // Check if it's a built-in command.
-        if (is_builtin_command(cmd->program ? cmd->program : cmd->args->data[0])) {
-            printf("Executing built-in command '%s'.\n", cmdName);
-            // Here, you can call your built-in handler (or simulate its behavior).
-            // For example:
-            handle_builtin_command(cmd);
-        } else {
-            printf("Would execute external command '%s'.\n", cmdName);
+        // Fork second child for the right-side command (cmd->next).
+        pid_t pid2 = fork();
+        if (pid2 < 0) {
+            perror("fork");
+            prevExitStatus = 1;
+            return;
         }
-        // For simulation purposes, assume the command succeeds.
-        prevExitStatus = 0;
+        if (pid2 == 0) {
+            // Child 2: Execute right-side command.
+            close(pipefd[1]); // Close write end.
+            if (dup2(pipefd[0], STDIN_FILENO) < 0) {
+                perror("dup2 (child2)");
+                exit(1);
+            }
+            close(pipefd[0]);
+            
+            const char *cmdName = (cmd->next->program != NULL) ? cmd->next->program : cmd->next->args->data[0];
+            if (is_builtin_command(cmdName)) {
+                handle_builtin_command(cmd->next);
+                exit(0);
+            } else {
+                char executablePath[4096];
+                if (strchr(cmdName, '/')) {
+                    strncpy(executablePath, cmdName, sizeof(executablePath));
+                    executablePath[sizeof(executablePath)-1] = '\0';
+                } else {
+                    const char *dirs[] = {"/usr/local/bin", "/usr/bin", "/bin"};
+                    int found = 0;
+                    for (int i = 0; i < 3; i++) {
+                        snprintf(executablePath, sizeof(executablePath), "%s/%s", dirs[i], cmdName);
+                        if (access(executablePath, X_OK) == 0) {
+                            found = 1;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        fprintf(stderr, "%s: command not found\n", cmdName);
+                        exit(1);
+                    }
+                }
+                execv(executablePath, cmd->next->args->data);
+                perror("execv");
+                exit(1);
+            }
+        }
+        
+        // Parent: close pipe file descriptors.
+        close(pipefd[0]);
+        close(pipefd[1]);
+        
+        // Wait for both children.
+        int status;
+        waitpid(pid1, NULL, 0);
+        waitpid(pid2, &status, 0);
+        if (WIFEXITED(status))
+            prevExitStatus = WEXITSTATUS(status);
+        else
+            prevExitStatus = 1;
+        
+        return;
+    }  // End pipeline block.
+
+    // ======================================================
+    // 3. Single Command Execution (no pipeline)
+    // ======================================================
+    const char *cmdName = (cmd->program != NULL) ? cmd->program : cmd->args->data[0];
+    int isBuiltin = is_builtin_command(cmdName);
+
+    // --------------------
+    // 3a. For built-in commands executed alone.
+    // --------------------
+    if (isBuiltin) {
+        // For built-ins that affect shell state, run them in the parent's process.
+        // If redirection is specified, temporarily redirect standard file descriptors.
+        int saved_stdin = -1, saved_stdout = -1;
+        int fdIn = -1, fdOut = -1;
+        
+        if (cmd->inputFile) {
+            saved_stdin = dup(STDIN_FILENO);
+            fdIn = open(cmd->inputFile, O_RDONLY);
+            if (fdIn < 0) {
+                perror("open input");
+                prevExitStatus = 1;
+                return;
+            }
+            if (dup2(fdIn, STDIN_FILENO) < 0) {
+                perror("dup2 input");
+                close(fdIn);
+                prevExitStatus = 1;
+                return;
+            }
+            close(fdIn);
+        }
+        if (cmd->outputFile) {
+            saved_stdout = dup(STDOUT_FILENO);
+            fdOut = open(cmd->outputFile, O_WRONLY | O_CREAT | O_TRUNC, 0640);
+            if (fdOut < 0) {
+                perror("open output");
+                prevExitStatus = 1;
+                if (saved_stdin != -1) {
+                    dup2(saved_stdin, STDIN_FILENO);
+                    close(saved_stdin);
+                }
+                return;
+            }
+            if (dup2(fdOut, STDOUT_FILENO) < 0) {
+                perror("dup2 output");
+                close(fdOut);
+                prevExitStatus = 1;
+                if (saved_stdin != -1) {
+                    dup2(saved_stdin, STDIN_FILENO);
+                    close(saved_stdin);
+                }
+                return;
+            }
+            close(fdOut);
+        }
+        
+        // Execute the built-in command in the parent's process.
+        handle_builtin_command(cmd);
+        prevExitStatus = 0;  // Assume success; you may adjust based on error checks.
+        
+        // Restore original file descriptors.
+        if (saved_stdin != -1) {
+            dup2(saved_stdin, STDIN_FILENO);
+            close(saved_stdin);
+        }
+        if (saved_stdout != -1) {
+            dup2(saved_stdout, STDOUT_FILENO);
+            close(saved_stdout);
+        }
+        return;
+    }
+    
+    // --------------------
+    // 3b. For external commands.
+    // --------------------
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("fork");
+        prevExitStatus = 1;
+        return;
+    }
+    if (pid == 0) { 
+        // Child process: handle redirection then exec.
+        if (cmd->inputFile) {
+            int fdIn = open(cmd->inputFile, O_RDONLY);
+            if (fdIn < 0) {
+                perror("open input");
+                exit(1);
+            }
+            if (dup2(fdIn, STDIN_FILENO) < 0) {
+                perror("dup2 input");
+                close(fdIn);
+                exit(1);
+            }
+            close(fdIn);
+        }
+        if (cmd->outputFile) {
+            int fdOut = open(cmd->outputFile, O_WRONLY | O_CREAT | O_TRUNC, 0640);
+            if (fdOut < 0) {
+                perror("open output");
+                exit(1);
+            }
+            if (dup2(fdOut, STDOUT_FILENO) < 0) {
+                perror("dup2 output");
+                close(fdOut);
+                exit(1);
+            }
+            close(fdOut);
+        }
+        
+        // Determine the correct executable path.
+        char executablePath[4096];
+        if (strchr(cmdName, '/')) {
+            strncpy(executablePath, cmdName, sizeof(executablePath));
+            executablePath[sizeof(executablePath)-1] = '\0';
+        } else {
+            const char *dirs[] = {"/usr/local/bin", "/usr/bin", "/bin"};
+            int found = 0;
+            for (int i = 0; i < 3; i++) {
+                snprintf(executablePath, sizeof(executablePath), "%s/%s", dirs[i], cmdName);
+                if (access(executablePath, X_OK) == 0) {
+                    found = 1;
+                    break;
+                }
+            }
+            if (!found) {
+                fprintf(stderr, "%s: command not found\n", cmdName);
+                exit(1);
+            }
+        }
+        
+        // Execute the external command.
+        execv(executablePath, cmd->args->data);
+        perror("execv");
+        exit(1);
+    } else {
+        // Parent: wait for the child to finish.
+        int status;
+        waitpid(pid, &status, 0);
+        if (WIFEXITED(status))
+            prevExitStatus = WEXITSTATUS(status);
+        else
+            prevExitStatus = 1;
+        return;
     }
 }
-
-
 
 
 /*
@@ -285,7 +584,7 @@ void processCommand(arraylist_t *list) {
     finalizeArgs(commandHead);
 
     // --- Instead of executing, simulate the execution of the command ---
-    simulateExecuteCommand(commandHead);
+    executeCommand(commandHead);
 
     // Finally, free the command structure (including any piped commands).
     freeCommandStruct(commandHead);
