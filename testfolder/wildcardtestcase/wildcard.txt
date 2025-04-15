@@ -1,0 +1,7 @@
+echo Searching through all files that start & end with a
+echo Using a*a, inputting it into ls executable (syntax: a*a<ls )
+cd testfolder/wildcardtestcase
+echo In the wildcardtestcase directory....
+ls a*a > output4.txt
+cat output4.txt
+echo EXPECTED output: addenda, agarga, akakkaka, alalala, alanda 

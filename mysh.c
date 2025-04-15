@@ -4,8 +4,8 @@
 #include <fcntl.h>    
 #include <string.h>
 #include <ctype.h>
-#include <sys/wait.h>
-#include <dirent.h>
+#include <sys/wait.h> 
+#include <dirent.h> 
 #include "arraylist.h" //Includes the arraylist functions we need
 #include "builtInCommands.h" //Includes functions for built in commands
 
@@ -17,15 +17,14 @@ int firstTimeRunning = 0;
 /*
  * The struct command where it will hold all the needed data when we process this within the function processCommand
  */
- 
 
 typedef struct command {
-    char *program;          // Program name, which is the executable
-    arraylist_t *args;      // Arraylist of argument strings, for execv, use args->data
+    char *program;          // The name of the program, which is really the executable
+    arraylist_t *args;      // Arraylist of argument strings, for execv use args->data as it holds the string names
     char *inputFile;        // Input redirection filename 
     char *outputFile;       // Output redirection filename 
     int pipePresent;        // Flag to indicate if a pipeline "|" exists
-    struct command *next;   // When pipelines exist we need to seperate commands so we will use a linked list of chains
+    struct command *next;   // When pipelines exist we need to seperate commands so we will use a linked list of commands
     enum { NONE, AND, OR } condition;  // Conditional operator relative to previous command
 } command_t;
 
@@ -39,8 +38,7 @@ command_t* createCommandStruct() {
         perror("malloc failed in createCommandStruct");
         return NULL;
     }
-    cmd->program = NULL;  // Will be set later if needed.
-    
+    cmd->program = NULL; 
     // Allocate and initialize the arraylist to store argument tokens
 
     cmd->args = malloc(sizeof(arraylist_t));
@@ -49,7 +47,7 @@ command_t* createCommandStruct() {
         free(cmd);
         return NULL;
     }
-    if (al_init(cmd->args, 10) != 0) {  // Start with capacity for 10 tokens.
+    if (al_init(cmd->args, 10) != 0) {  // Start with capacity for 10 wirds
         fprintf(stderr, "Error initializing args arraylist\n");
         free(cmd->args);
         free(cmd);
@@ -65,32 +63,27 @@ command_t* createCommandStruct() {
 }
 
 /*
- * Free a command structure.
- * Frees all allocated strings stored in the args arraylist via al_destroy,
- * as well as any redirection strings and any piped commands.
+ * Free a command structure
+ * Frees all allocated strings stored in the args arraylist with al_destroy, as well as any redirection strings and any piped commands
  */
 
 void freeCommandStruct(command_t *cmd) {
     if (cmd == NULL){
         return;
     }
-    
     if (cmd->program != NULL){
         free(cmd->program);
     }
-    
     if (cmd->args != NULL){
-        al_destroy(cmd->args);  // This frees the internal tokens and the data array.
+        al_destroy(cmd->args);  // This frees the internal words and the data array
         free(cmd->args);
     }
-    
     if (cmd->inputFile != NULL){
         free(cmd->inputFile);
     }
     if (cmd->outputFile != NULL){
         free(cmd->outputFile);
-    }
-    
+    } 
     if (cmd->next != NULL){
         freeCommandStruct(cmd->next);
     }
@@ -99,11 +92,12 @@ void freeCommandStruct(command_t *cmd) {
 }
 
 /*
- * Helper function: Add a token to the command's arguments arraylist.
- * Duplicates the token and adds it using al_append.
+ * This function will add a token to the struct commands arguments arraylist
+ * It will duplicate the token and adds it using al_append
  */
+
 void addTokenToArgs(command_t *cmd, const char *token) {
-    char *dup = strdup(token);
+    char *dup = strdup(token); //We will use stdup alot it just duplicates the string instead of us using malloc alot
     if (!dup) {
         perror("strdup failed in addTokenToArgs");
         exit(EXIT_FAILURE);
@@ -117,8 +111,9 @@ void addTokenToArgs(command_t *cmd, const char *token) {
 
 /*
  * finalizeArgs: Append a NULL pointer to the end of our args arraylist.
- * This ensures that cmd->args->data (a char ** pointer) is properly NULL-terminated.
+ * This ensures that cmd->args->data is properly NULL-terminated so we dont get any errors
  */
+
 void finalizeArgs(command_t *cmd) {
     if (al_append(cmd->args, NULL) != 0) {
         fprintf(stderr, "Failed to finalize args arraylist\n");
@@ -126,24 +121,23 @@ void finalizeArgs(command_t *cmd) {
     }
 }
 
-
-
-// is_builtin_command: returns 1 if cmd is one of the built-in commands.
-int is_builtin_command(const char *cmd) {
+// Just to see if what we have is a builtin command
+int isBuiltInCommand(const char *cmd) {
     return (strcmp(cmd, "cd") == 0 || strcmp(cmd, "pwd") == 0 ||
             strcmp(cmd, "exit") == 0 || strcmp(cmd, "die") == 0 ||
             strcmp(cmd, "which") == 0);
 }
 
-// handle_builtin_command: dispatches to the appropriate built-in handler.
-// It uses cmd->program if set; otherwise, it takes the first token in cmd->args->data.
+// This will handle our built in commands, it will send to the built-in function we made
+// It uses cmd->program if it is set, otherwise it takes the first token in cmd->args->data.
 void handle_builtin_command(command_t *cmd) {
     const char *cmdName;
-if (cmd->program != NULL) {
-    cmdName = cmd->program;
-} else {
-    cmdName = cmd->args->data[0];
-}
+
+    if (cmd->program != NULL) {
+        cmdName = cmd->program;
+    } else {
+        cmdName = cmd->args->data[0];
+    }
 
     if (strcmp(cmdName, "cd") == 0) {
         builtin_cd(cmd->args);
@@ -162,29 +156,19 @@ if (cmd->program != NULL) {
 
 
 /*
- * executeCommand:
- * Executes a single command, or a simple pipeline of two commands, according to:
- * - Conditional operators: if the command starts with "and" or "or", we decide whether to
- *   execute it based on prevExitStatus.
- * - Pipelines: if cmd->pipePresent is set, we assume a two-command pipeline.
- * - Redirection: input (<) and output (>) redirection are performed in the appropriate child
- *   processes (or, for built-in commands that modify shell state, in the parent after temporarily
- *   modifying the file descriptors).
- *
- * For built-in commands (cd, pwd, exit, die, which) that run in the main shell process,
- * we handle them directly when no pipeline is involved. However, if they appear in a pipeline,
- * they must be forked (and their effect on the shell process will not persist).
+  executeCommand, the main functions, alot of test cases
+  Executes a single command, or a  pipeline of two commands, according to:
+  - Conditional operators: if the command starts with "and" or "or", we decide whether to execute it based on firstTimeRunning
+  -Pipelines: if cmd->pipePresent is set, we assume a two-command pipeline.
+  -Redirection: input (<) and output (>) redirection are performed in the child processes 
+  -Built ins can be run with additional args we will handle them directly when no pipeline is involved. If they appear in a pipeline, we will fork them.
  */
 void executeCommand(command_t *cmd) {
-    // ======================================================
-    // 1. Handle Conditional Execution:
-    // ======================================================
-  
+    //Conditional Execution:
     if (cmd->condition != NONE) {
         //!This is the case where it is the very command
         if(firstTimeRunning == 0){
             fprintf(stdout, "Error: 'and' or 'or' command provided when this is the first command run. \n");
-            firstTimeRunning = 1;
             return;
         }
         if (cmd->condition == AND && prevExitStatus != 0) {
@@ -198,11 +182,7 @@ void executeCommand(command_t *cmd) {
     }
     firstTimeRunning = 1;
 
-    // ======================================================
-    // 2. Pipeline Execution (assumed to be two commands)
-    // ======================================================
-
-    //!NEED TO FIX, USE OF AND OR OR AFTER | IS ILLEGAL 
+    //Pipeline Execution
     
     if (cmd->pipePresent && cmd->next) {
         int pipefd[2];
@@ -220,31 +200,29 @@ void executeCommand(command_t *cmd) {
             return;
         }
         if (pid1 == 0) {
-            // Child 1: Execute left-side command.
-            // Close unused read end.
+            // We are now in child 1 we will execute the left-side command.
             close(pipefd[0]);
-            // Redirect standard output to pipe's write end.
-            if (dup2(pipefd[1], STDOUT_FILENO) < 0) {
+            // Redirect standard output to pipes write end.
+            if (dup2(pipefd[1], STDOUT_FILENO) < 0) { //Check for errors
                 perror("dup2 (child1)");
                 exit(1);
             }
             close(pipefd[1]);
             
-            // For simplicity, we assume pipeline subcommands have no redirection.
+            //Based on the project we can assume pipeline subcommands have no redirection
             const char *cmdName;
             if (cmd->program != NULL) {
                 cmdName = cmd->program;
             } else {
                 cmdName = cmd->args->data[0];
             }
-            if (is_builtin_command(cmdName)) {
-                // In a pipeline, run built-in in the child.
+            if (isBuiltInCommand(cmdName)) {
                 handle_builtin_command(cmd);
                 exit(0);
             } else {
-                // If cmdName is a bare name (no '/') search in the prescribed directories.
+                // If cmdName is a bare name meaning no "/" search in the prescribed directories.
                 char executablePath[4096];
-                if (strchr(cmdName, '/')) {
+                if (strchr(cmdName, '/')) { // strchr finds the first instance of this char within a string
                     strncpy(executablePath, cmdName, sizeof(executablePath));
                     executablePath[sizeof(executablePath)-1] = '\0';
                 } else {
@@ -268,7 +246,7 @@ void executeCommand(command_t *cmd) {
             }
         }
 
-        // Fork second child for the right-side command (cmd->next).
+        // Fork second child for the right-side command
         pid_t pid2 = fork();
         if (pid2 < 0) {
             perror("fork");
@@ -276,7 +254,6 @@ void executeCommand(command_t *cmd) {
             return;
         }
         if (pid2 == 0) {
-            // Child 2: Execute right-side command.
             close(pipefd[1]); // Close write end.
             if (dup2(pipefd[0], STDIN_FILENO) < 0) {
                 perror("dup2 (child2)");
@@ -289,8 +266,8 @@ void executeCommand(command_t *cmd) {
         cmdName = cmd->next->program;
             } else {
             cmdName = cmd->next->args->data[0];
-}
-            if (is_builtin_command(cmdName)) {
+            }
+            if (isBuiltInCommand(cmdName)) {
                 handle_builtin_command(cmd->next);
                 exit(0);
             } else {
@@ -319,7 +296,7 @@ void executeCommand(command_t *cmd) {
             }
         }
         
-        // Parent: close pipe file descriptors.
+        // We are now done, now in the parent close pipe file descriptors
         close(pipefd[0]);
         close(pipefd[1]);
         
@@ -327,30 +304,30 @@ void executeCommand(command_t *cmd) {
         int status;
         waitpid(pid1, NULL, 0);
         waitpid(pid2, &status, 0);
-        if (WIFEXITED(status))
+        if (WIFEXITED(status)){
             prevExitStatus = WEXITSTATUS(status);
-        else
+        }
+        else{
             prevExitStatus = 1;
+        }
         
         return;
-    }  // End pipeline block.
+    }  // End of pipeline block
 
-    // ======================================================
-    // 3. Single Command Execution (no pipeline)
-    // ======================================================
+    //Single Command Execution (no pipeline)
+
     const char *cmdName;
-if (cmd->program != NULL) {
-    cmdName = cmd->program;
-} else {
-    cmdName = cmd->args->data[0];
-}
-    int isBuiltin = is_builtin_command(cmdName);
+    if (cmd->program != NULL) {
+        cmdName = cmd->program;
+    } else {
+        cmdName = cmd->args->data[0];
+    }
+    int isBuiltin = isBuiltInCommand(cmdName);
 
-    // --------------------
-    // 3a. For built-in commands executed alone.
-    // --------------------
+    //--->For built-in commands executed alone
+
     if (isBuiltin) {
-        // For built-ins that affect shell state, run them in the parent's process.
+        // For built-ins that affect shell state run them in the parent's process.
         // If redirection is specified, temporarily redirect standard file descriptors.
         int saved_stdin = -1, saved_stdout = -1;
         int fdIn = -1, fdOut = -1;
@@ -412,9 +389,7 @@ if (cmd->program != NULL) {
         return;
     }
     
-    // --------------------
-    // 3b. For external commands.
-    // --------------------
+    // 3b. For exec commands.
     pid_t pid = fork();
     if (pid < 0) {
         perror("fork");
@@ -422,7 +397,7 @@ if (cmd->program != NULL) {
         return;
     }
     if (pid == 0) { 
-        // Child process: handle redirection then exec.
+        // Child process--> handle redirection then exec.
         if (cmd->inputFile) {
             int fdIn = open(cmd->inputFile, O_RDONLY);
             if (fdIn < 0) {
@@ -450,7 +425,7 @@ if (cmd->program != NULL) {
             close(fdOut);
         }
         
-        // Determine the correct executable path.
+        // We now must get the correct executable path
         char executablePath[4096];
         if (strchr(cmdName, '/')) {
             strncpy(executablePath, cmdName, sizeof(executablePath));
@@ -471,12 +446,12 @@ if (cmd->program != NULL) {
             }
         }
         
-        // Execute the external command.
+        // Call exec and then run it given the path we created
         execv(executablePath, cmd->args->data);
         perror("execv");
         exit(1);
     } else {
-        // Parent: wait for the child to finish.
+        // Now in parent we must wait for the child to finish.
         int status;
         waitpid(pid, &status, 0);
         if (WIFEXITED(status))
@@ -588,6 +563,13 @@ void processCommand(arraylist_t *list) {
         return; // Nothing to process.
     }
     
+    // Only disallow a conditional operator as the first token when no command has run yet.
+    if (firstTimeRunning == 0 &&
+       (strcmp(list->data[0], "and") == 0 || strcmp(list->data[0], "or") == 0)) {
+        fprintf(stderr, "Error: 'and' or 'or' command provided when this is the first command run.\n");
+        return;
+    }
+    
     // Create the head of the command chain.
     command_t *commandHead = createCommandStruct();
     if (!commandHead) {
@@ -646,22 +628,16 @@ void processCommand(arraylist_t *list) {
         }
         // Check for conditional tokens "and" / "or".
         else if (strcmp(token, "and") == 0 || strcmp(token, "or") == 0) {
-            // According to the specification, conditionals must occur
-            // as the first token of the entire command (i.e. in commandHead).
-            // If we're not in the head (i.e. cmd != commandHead), it's an error.
+            // If encountered after the first command in the chain, it's an error.
             if (cmd != commandHead) {
-                fprintf(stderr, "Syntax error: conditional operator after a pipe is invalid.\n");
+                fprintf(stderr, "Syntax error: conditional operator cannot appear after a pipe\n");
                 freeCommandStruct(commandHead);
                 return;
             }
-            if (strcmp(token, "and") == 0) {
-                cmd->condition = AND;
-            } else {
-                cmd->condition = OR;
-            }
+            cmd->condition = (strcmp(token, "and") == 0) ? AND : OR;
             // Do not add the conditional token to the arguments list.
         }
-        // Otherwise, treat the token as a normal argument.
+        // Otherwise, treat token as a normal argument.
         else {
             if (strchr(token, '*') != NULL) {
                 expandWildcard(cmd, token);
@@ -673,35 +649,45 @@ void processCommand(arraylist_t *list) {
     
     // Finalize the args arraylist to ensure NULL termination.
     finalizeArgs(commandHead);
-
-    // For simulation purposes, if the program name has not been explicitly set,
+    
+    // If no command (i.e. no non-NULL token) was added to the head command's args,
+    // then there's nothing to execute.
+    if (commandHead->args->data[0] == NULL) {
+        fprintf(stderr, "Error: missing command after conditional operator.\n");
+        freeCommandStruct(commandHead);
+        return;
+    }
+    
+    // If the command's program name has not been explicitly set,
     // assume it's the first token in the arguments.
     if (commandHead->program == NULL && commandHead->args->data[0] != NULL) {
         commandHead->program = strdup(commandHead->args->data[0]);
         if (!commandHead->program) {
-            perror("strdup failed for setting program");
+            perror("strdup failed for program name");
             freeCommandStruct(commandHead);
             return;
         }
     }
 
-
-{
-    command_t *temp = commandHead->next;
-    while (temp != NULL) {
-        if (temp->condition != NONE) {
-            fprintf(stderr, "Syntax error: conditional operator cannot appear after a pipe.\n");
-            freeCommandStruct(commandHead);
-            return;
+    {
+        command_t *temp = commandHead->next;
+        while (temp != NULL) {
+            if (temp->condition != NONE) {
+                fprintf(stderr, "Error: conditional operator cannot appear after a pipe\n");
+                freeCommandStruct(commandHead);
+                return;
+            }
+            temp = temp->next;
         }
-        temp = temp->next;
     }
-}
-    
-    // Execute or simulate executing the command structure.
+     
+    // Execute the command chain.
     executeCommand(commandHead);
-
-    // Finally, free the command structure (including any piped commands).
+    
+    // Mark that we have now run at least one command.
+    firstTimeRunning = 1;
+    
+    // Free the command structure
     freeCommandStruct(commandHead);
 }
 
@@ -770,7 +756,7 @@ void tokenizeCommand(const char *command, arraylist_t *list, int linelen) {
         }
         strcpy(dup, wordArray);
         
-        if (al_append(list, dup) != 0) {
+        if (al_append(list, dup) != 0)
             fprintf(stderr, "Failed to add token to the array list\n");
             free(dup);
             return;
@@ -846,7 +832,6 @@ void process_lines(int fd, arraylist_t *list, int interactive) {
         }
         line[linelen] = '\0';
         tokenizeCommand(line, list, linelen);
-        printf("Echoed command: ");
         processCommand(list);
         free(line);
     }
@@ -893,7 +878,7 @@ int main(int argc, char *argv[]) {
     process_lines(fd, list, interactive);
     
     if (interactive) {
-        printf("Exiting my shell.\n");
+        printf("Good bye! Exiting my shell\n");
     }
     if (fd != STDIN_FILENO) {
         close(fd);
