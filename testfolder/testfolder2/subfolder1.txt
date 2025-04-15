@@ -1,0 +1,9 @@
+arraylist.c
+arraylist.h
+builtInCommands.c
+builtInCommands.h
+mysh
+mysh.c
+output.txt
+testfolder
+test.txt

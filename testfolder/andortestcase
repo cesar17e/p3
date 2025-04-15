@@ -1,0 +1,3 @@
+and ls
+and echo "This should work! Printing this out is expected!"
+or echo "This should not print! Printing this out is unexpected!"

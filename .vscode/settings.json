@@ -1,5 +1,6 @@
 {
-    "files.associations": {
-        "cstdlib": "c"
-    }
+  "files.associations": {
+    "cstdlib": "c"
+  },
+  "C_Cpp_Runner.msvcBatchPath": ""
 }
