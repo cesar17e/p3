@@ -74,7 +74,7 @@ void builtin_which(arraylist_t *list) {
     int found = 0;
     for (int i = 0; i < 3; i++) {
         strncpy(path, dirs[i], sizeof(path) - 1);
-        path[sizeof(path) - 1] = '\0';  // Ensure null-termination.
+        path[sizeof(path) - 1] = '\0'; 
         strncat(path, "/", sizeof(path) - strlen(path) - 1);
         strncat(path, cmd, sizeof(path) - strlen(path) - 1); //So its like if we get ls we cat --> usr/bin/ls and then accesds will find it and then print it out to user
         

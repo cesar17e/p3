@@ -6,8 +6,8 @@
 #include <ctype.h>
 #include <sys/wait.h> 
 #include <dirent.h> 
-#include "arraylist.h" //Includes the arraylist functions we need
-#include "builtInCommands.h" //Includes functions for built in commands
+#include "arraylist.h"
+#include "builtInCommands.h" 
 
 #define BUFLEN 1024 // Standard buffer length we can make this bigger
 #define wordArraySize 500 // The word array size for the tokenizer command
@@ -47,7 +47,7 @@ command_t *createCommandStruct() {
         free(cmd);
         return NULL;
     }
-    if (al_init(cmd->args, 10) != 0) {  // Start with capacity for 10 words
+    if (al_init(cmd->args, 10) != 0) { 
         fprintf(stderr, "Error initializing args arraylist\n");
         free(cmd->args);
         free(cmd);
@@ -470,8 +470,8 @@ void executeCommand(command_t *cmd) {
 }
 
 
-// ExpandWildcard: If token contains '*' we have to expand it by matching files in a directory
-// If token contains a '/', use the part before the last '/' as the directory, otherwise, search in the current directory
+// ExpandWildcard-->If a word contains * we have to expand it by matching files in a directory
+// If a word contains a /, use the part before the last / as the directory, otherwise, search in the current directory
 void expandWildcard(command_t *cmd, const char *token) {
     const char *slash = strrchr(token, '/');
     char dirname[1024];
@@ -502,7 +502,6 @@ void expandWildcard(command_t *cmd, const char *token) {
 
     DIR *dir = opendir(dirname);
     if (!dir) {
-        // If the directory cannot be opened, fall back to adding the original token.
         addTokenToArgs(cmd, token);
         return;
     }
@@ -510,7 +509,6 @@ void expandWildcard(command_t *cmd, const char *token) {
     struct dirent *entry;
     int matches = 0;
     while ((entry = readdir(dir)) != NULL) {
-        // Optionally skip hidden files unless the pattern begins with '.'
         if (before[0] != '.' && entry->d_name[0] == '.')
             continue;
 
@@ -533,7 +531,7 @@ void expandWildcard(command_t *cmd, const char *token) {
             }
         }
 
-        // Only add the entry if it strictly matches the pattern
+        // Only add the entry if it matches the pattern
         char fullpath[2048];
         if (strcmp(dirname, ".") == 0) {
             strncpy(fullpath, entry->d_name, sizeof(fullpath) - 1);
@@ -558,39 +556,37 @@ void expandWildcard(command_t *cmd, const char *token) {
 }
 
 
-/* Here we will process the commands given the provided arraylist from tokenizer
-  and build a command structure using the arraylist for the arguments, then we will send to execute
+/* Here we will process the commands given the provided arraylist from the tokenizerFunction and build a command structure using the arraylist for the arguments, then we will send to execute
  */
-void processCommand(arraylist_t *list) {
+ void processCommand(arraylist_t *list) {
     if (list->length == 0) {
         return; // Nothing to process.
     }
     
-    // Dont allow a conditional operator as the first token when no command has run yet
+    // Do not allow a conditional operator as the first command not allowed must be ran after some other failed or succeeded commands
     if (firstTimeRunning == 0 &&
-       (strcmp(list->data[0], "and") == 0 || strcmp(list->data[0], "or") == 0)) {
-        fprintf(stderr, "Eorro: 'and' or 'or' command provided when this is the first command run\n");
+        (strcmp(list->data[0], "and") == 0 || strcmp(list->data[0], "or") == 0)) {
+        fprintf(stderr, "Error: 'and' or 'or' command provided when this is the first command run\n");
         return;
     }
     
-    // Create the head of the command chain.
     command_t *commandHead = createCommandStruct();
     if (!commandHead) {
         fprintf(stderr, "Failed to create command structure\n");
         return;
     }
     
-    command_t *cmd = commandHead;  // Pointer to current command.
+    command_t *ptr = commandHead; //Made a comand linked list for the pipe if it appears
 
-    // Iterate through tokens from the token list.
+    // Process each token in the tokenized input.
     for (int i = 0; i < list->length; i++) {
         char *token = list->data[i];
         
-        if (strcmp(token, "<") == 0) { //If token == <
-            i++;  // Go up one we add the file name
+        if (strcmp(token, "<") == 0) {  // If word == >
+            i++;  // Move to the filename.
             if (i < list->length) {
-                cmd->inputFile = strdup(list->data[i]);
-                if (!cmd->inputFile) {
+                ptr->inputFile = strdup(list->data[i]);
+                if (!ptr->inputFile) {
                     perror("strdup failed for inputFile");
                     freeCommandStruct(commandHead);
                     return;
@@ -601,11 +597,11 @@ void processCommand(arraylist_t *list) {
                 return;
             }
         }
-        else if (strcmp(token, ">") == 0) { //If token == >
-            i++;  //Go up one we add the file name
+        else if (strcmp(token, ">") == 0) {  // If word == >
+            i++;  // Move to the filename.
             if (i < list->length) {
-                cmd->outputFile = strdup(list->data[i]);
-                if (!cmd->outputFile) {
+                ptr->outputFile = strdup(list->data[i]);
+                if (!ptr->outputFile) {
                     perror("strdup failed for outputFile");
                     freeCommandStruct(commandHead);
                     return;
@@ -616,46 +612,43 @@ void processCommand(arraylist_t *list) {
                 return;
             }
         }
-        else if (strcmp(token, "|") == 0) { //If token == |
-            cmd->pipePresent = 1;
-            cmd->next = createCommandStruct();
-            if (!cmd->next) { //Something went wrong
-                fprintf(stderr, "Pipeline has no next command failed to proceed\n");
+        else if (strcmp(token, "|") == 0) {  // If token == |
+            ptr->pipePresent = 1;
+            ptr->next = createCommandStruct();
+            if (!ptr->next) { 
+                fprintf(stderr, "Pipeline has no next command; failed to proceed\n");
                 freeCommandStruct(commandHead);
                 return;
             }
-            cmd = cmd->next;  // Switch to the next command structure.
+            ptr = ptr->next; 
         }
-        else if (strcmp(token, "and") == 0 || strcmp(token, "or") == 0) { //If token == and or or
-            // If encountered after the first command in the chain, we have an error this cant happen
-            if (cmd != commandHead) {
+        else if (strcmp(token, "and") == 0 || strcmp(token, "or") == 0) {  //Handle conditional operators
+            if (ptr != commandHead) {
                 fprintf(stderr, "Error: conditional operator cannot appear after a pipe\n");
                 freeCommandStruct(commandHead);
                 return;
             }
-            cmd->condition = (strcmp(token, "and") == 0) ? AND : OR;
-            // Do not add the conditional token to the arguments list.
+            ptr->condition = (strcmp(token, "and") == 0) ? AND : OR;
         }
-        else { //No special tokens besides *
+        else {  // Now just as reguar besides the * stuff strchr looks for it at once
             if (strchr(token, '*') != NULL) {
-                expandWildcard(cmd, token);
+                expandWildcard(ptr, token);
             } else {
-                addTokenToArgs(cmd, token);
+                addTokenToArgs(ptr, token);
             }
         }
     }
     
-    //Finally we send it to here for null term
+    // Finalize the argument list by appending a NULL pointer.
     finalizeArgs(commandHead);
     
     if (commandHead->args->data[0] == NULL) {
         fprintf(stderr, "Error: missing command after conditional operator.\n");
         freeCommandStruct(commandHead);
         return;
-    } //Nothing to execute 
-
-
-    //If program name isnt made just assume its as index 0
+    }
+    
+    // If the program name wasnt given just use arraylist[0]
     if (commandHead->program == NULL && commandHead->args->data[0] != NULL) {
         commandHead->program = strdup(commandHead->args->data[0]);
         if (!commandHead->program) {
@@ -664,7 +657,8 @@ void processCommand(arraylist_t *list) {
             return;
         }
     }
-
+    
+    // Make sure no conditioals come after piping
     command_t *temp = commandHead->next;
     while (temp != NULL) {
         if (temp->condition != NONE) {
@@ -675,23 +669,18 @@ void processCommand(arraylist_t *list) {
         temp = temp->next;
     }
     
-    //Now we enter the main stuff, still gotta fix it later
+    // Execute the command (still working on it)
     executeCommand(commandHead);
     
-    firstTimeRunning = 1; //Mark that we have now run at least one command for the conditional logic stuff
+    firstTimeRunning = 1; // Mark that a command has been executed.
+    
 
-    freeCommandStruct(commandHead); //Free it at the end
+    freeCommandStruct(commandHead); //Finally finish up and head back to processing lines
 }
 
 
-/*
-it splits the given command into tokens using whitespace as the delimiter.
-Also, it stops processing further characters if a # is encountered.
-NOTE: For simplicity, you are permitted to assume that >, <, and | are separated from other tokens by whitespace.
-*/
-
-void tokenizeCommand(const char *command, arraylist_t *list, int linelen) {
-    int insideAWord = 0;         // 0 = not inside a token, 1 = inside a token.
+void seperateWords (char *command, arraylist_t *list, int linelen) {
+    int insideAWord = 0;         // 0 = not inside a token or  1 = inside a token
     char wordArray[wordArraySize];
     int wordIndex = 0;       
     
@@ -701,15 +690,15 @@ void tokenizeCommand(const char *command, arraylist_t *list, int linelen) {
     for (int i = 0; i < linelen; i++) {
         char c = command[i];
         
-        // If # is encountered, stop processing the rest as it signals a comment.
+        // If # is encountered, stop processing the rest as it is the beginning of a comment
         if (c == '#') {
             break;
         }
         
         if (isspace(c)) {
-            // End of token if we're currently in one.
+            // end of word if we're currently in one.
             if (insideAWord) {
-                wordArray[wordIndex] = '\0'; // Null-terminate the token.
+                wordArray[wordIndex] = '\0';
                 int token_len = wordIndex;  
                 char *dup = malloc(token_len + 1);  // +1 for the null terminator.
                 if (!dup) {
@@ -717,7 +706,7 @@ void tokenizeCommand(const char *command, arraylist_t *list, int linelen) {
                     return;
                 }
                 strcpy(dup, wordArray);
-                // Append the token to the array list
+                // Add the word to the array list
                 if (al_append(list, dup) != 0) {
                     fprintf(stderr, "Failed to add token to the array list\n");
                     free(dup);
@@ -784,19 +773,19 @@ void process_lines(int fd, arraylist_t *list, int interactive) {
                 linelen += seglen;
                 line[linelen] = '\0';
                 
-                // At this point the line is complete and it holds a complete command.
+                // At this point the line is complete and it holds a complete command
                 // Tokenize it
-                tokenizeCommand(line, list, linelen);
+                seperateWords(line, list, linelen);
 
                 processCommand(list);
 
-                // In interactive mode, print the prompt for the next command.
+                // For interactive mode we must print the prompt for the next command
                 if (interactive) {
                     printf("mysh> ");
                     fflush(stdout);
                 }
                       
-                // Clean up for the next command.
+                // Clean up for the next command
                 free(line);
                 line = NULL;
                 linelen = 0;
@@ -815,7 +804,7 @@ void process_lines(int fd, arraylist_t *list, int interactive) {
             linelen += seglen;
         }
     }
-    // Process any leftover command without a newline.
+    // Process any leftover command without a newline
     if (line && linelen > 0) {
         line = realloc(line, linelen + 1);
         if (!line) {
@@ -823,16 +812,14 @@ void process_lines(int fd, arraylist_t *list, int interactive) {
             exit(EXIT_FAILURE);
         }
         line[linelen] = '\0';
-        tokenizeCommand(line, list, linelen);
+        seperateWords(line, list, linelen);
         processCommand(list);
         free(line);
     }
 
 }
 
-
-
-// Main--> we set up input, determine interactive mode, and process commands.
+// Main--> we set up input, set interactive mode or batch mode and and process the line
 int main(int argc, char *argv[]) {
     int fd;
     if (argc > 1) {
@@ -850,7 +837,7 @@ int main(int argc, char *argv[]) {
         printf("Welcome to my shell!\n");
     }
     
-    // Allocate and initialize the array list.
+    // Initialize the array list
     arraylist_t *list = malloc(sizeof(arraylist_t));
     if (!list) {
         perror("malloc");
@@ -861,21 +848,22 @@ int main(int argc, char *argv[]) {
         perror("Problem with arraylist declaration");
     }
     
-    // In interactive mode, print a prompt before processing commands.
+    // For interactive mode
     if (interactive) {
         printf("mysh> ");
         fflush(stdout);
     }
     
-    process_lines(fd, list, interactive);
+    process_lines(fd, list, interactive); //Our one loop
     
     if (interactive) {
         printf("Good bye! Exiting my shell\n");
     }
-    if (fd != STDIN_FILENO) {
+
+    if (fd != STDIN_FILENO) { //If in batch mode
         close(fd);
     }
-    
+
     al_destroy(list);
     free(list);
     

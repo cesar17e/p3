@@ -1,3 +1,4 @@
 true
 and echo "This should print out when first command is run! This is expected!"
-echo This prints if the above and didn't run, this is not expected! or
+or echo This prints if the above & didn't run, this is not expected!
+ 
