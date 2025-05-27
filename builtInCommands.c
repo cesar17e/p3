@@ -89,4 +89,4 @@ void builtin_which(arraylist_t *list) {
     if (!found){ //If we didnt find it print something out
         fprintf(stderr, "which: %s not found\n", cmd);
     }
-}
+}  //
