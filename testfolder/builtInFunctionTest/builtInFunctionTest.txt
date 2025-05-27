@@ -1,0 +1,7 @@
+echo Printing all txt files
+ls *.txt > output.txt
+cd ..
+cat output.txt
+echo We are in directory:
+pwd
+echo Test Complete!

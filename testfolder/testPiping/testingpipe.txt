@@ -1,0 +1,6 @@
+ls | grep .c #Should only print out on terminal files that include the term .c within their names
+cat doesNotExist.txt | grep foo #Should print an erro as cat doesNotExist fails
+ls | grep txt #Again should only print out on terminal files that include the term txt within their names
+ls | sort #Sorts the files
+pwd | grep / #Should give us 
+echo Test Complete!

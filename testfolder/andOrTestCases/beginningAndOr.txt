@@ -1,0 +1,8 @@
+and ls
+and pwd
+or ls
+or pwd
+ls
+and pwd
+or ls
+echo Test Complete!

@@ -1,0 +1,5 @@
+ls #ls --> this code should not be able to run
+pwd 
+#and ls --> again nothing should occur after this
+#Nothing should be happening here 
+#Again

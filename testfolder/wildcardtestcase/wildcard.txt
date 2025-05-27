@@ -5,4 +5,4 @@ echo In the wildcardtestcase directory....
 ls a*a > output4.txt
 cat output4.txt
 echo EXPECTED output: addenda, alaska, alpha, amanda, anacona, anna, attenda 
-
+echo Test Complete!
